@@ -1,0 +1,15 @@
+{
+    "1": {
+        "font_name": "calibrib",
+        "font_size": 30,
+        "primary_color": "&HFFFFFF&",
+        "outline_color": "&H000000&",
+        "back_color": "&H000000&",
+        "outline_width": 2,
+        "shadow_width": 1,
+        "margin_v": 20,
+        "margin_h": 100,
+        "alignment": 2,
+        "max_chars": 30
+    }
+}

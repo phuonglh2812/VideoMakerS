@@ -1,0 +1,41 @@
+# Exclude MC_CODE folder
+MC_CODE/
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.zip
+*.rar
+*.7z
+
+# Python cache and environment files
+__pycache__/
+*.pyc
+.env
+*.log
+
+# Large data and cache files
+*.cache
+*.tmp
+*.bak
+
+# Ignore specific large directories
+input/
+final/
+output/
+temp/
+used/
+
+# Egg info and build directories
+*.egg-info/
+build/
+dist/
+
+# IDE and system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

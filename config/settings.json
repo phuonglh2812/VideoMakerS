@@ -1,0 +1,34 @@
+{
+    "common": {
+        "base_path": ".",
+        "log_level": "INFO"
+    },
+    "workflows": {
+        "video_maker": {
+            "input_dir": "raw",
+            "output_dir": "output",
+            "temp_dir": "temp",
+            "cut_dir": "cut",
+            "min_duration": 4.0,
+            "max_duration": 7.0,
+            "video_settings": {
+                "width": 1920,
+                "height": 1080,
+                "fps": 30
+            },
+            "font_settings": {
+                "font_name": "Elephant",
+                "font_size": 30,
+                "primary_color": "&Hffffff&",
+                "outline_color": "&H000000&",
+                "back_color": "&H000000&",
+                "outline_width": 2.0,
+                "shadow_width": 2.0,
+                "margin_v": 10,
+                "margin_h": 100,
+                "alignment": 2,
+                "max_chars": 40
+            }
+        }
+    }
+}

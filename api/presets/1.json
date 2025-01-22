@@ -1,0 +1,13 @@
+{
+    "font_name": "Arial",
+    "font_size": 30,
+    "primary_color": "&HFFFFFF&",
+    "outline_color": "&H000000&",
+    "back_color": "&H000000&",
+    "outline_width": 2.0,
+    "shadow_width": 0.0,
+    "margin_v": 20,
+    "margin_h": 20,
+    "alignment": 2,
+    "max_chars": 40
+}

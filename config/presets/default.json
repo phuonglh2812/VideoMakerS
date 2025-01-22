@@ -1,0 +1,17 @@
+{
+    "font": "Arial",
+    "font_size": 48,
+    "alignment": 2,
+    "margin_v": 20,
+    "margin_h": 20,
+    "outline": 2,
+    "shadow": 2,
+    "color": "#FFFFFF",
+    "outline_color": "#000000",
+    "shadow_color": "#000000",
+    "bold": true,
+    "italic": false,
+    "spacing": 0,
+    "border_style": 1,
+    "encoding": 1
+}
