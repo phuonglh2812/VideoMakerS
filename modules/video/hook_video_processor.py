@@ -467,7 +467,11 @@ class HookVideoProcessor:
         """
         try:
             from ..utils.settings_manager import SettingsManager
-            settings_manager = SettingsManager(self.temp_dir)
+            from ..utils.task_history_manager import TaskHistoryManager
+            from api.core.paths import path_manager
+            
+            settings_manager = SettingsManager()  # SettingsManager uses path_manager internally
+            task_history = TaskHistoryManager(path_manager.base_path)
             
             # Load settings từ preset
             subtitle_settings = settings_manager.load_preset(preset_name)
@@ -484,8 +488,21 @@ class HookVideoProcessor:
                 is_vertical=is_vertical
             )
             
+            # Update task status to completed after video processing
+            task_history.update_task_status(
+                task_id,
+                "completed",
+                message="Video processing completed"
+            )
+            
         except Exception as e:
             logging.error(f"Lỗi khi xử lý video hook: {e}")
+            # Update task status to error
+            task_history.update_task_status(
+                task_id,
+                "error",
+                error=str(e)
+            )
             raise
 
     def process_hook_video(
@@ -667,6 +684,12 @@ class HookVideoProcessor:
             is_vertical (bool): True nếu là video dọc (9:16)
         """
         try:
+            from ..utils.settings_manager import SettingsManager
+            from ..utils.task_history_manager import TaskHistoryManager
+            from api.core.paths import path_manager
+            
+            task_history = TaskHistoryManager(path_manager.base_path)
+            
             # Kiểm tra thư mục đầu vào
             if not input_folder.exists():
                 raise ValueError(f"Thư mục không tồn tại: {input_folder}")
@@ -710,6 +733,10 @@ class HookVideoProcessor:
                 )
 
             # Xử lý từng nhóm file
+            processed_count = 0
+            error_count = 0
+            output_paths = []
+            
             for name, group in file_groups.items():
                 if len(group) >= 4:  # Phải có đủ file
                     try:
@@ -727,10 +754,41 @@ class HookVideoProcessor:
                             subtitle_settings=subtitle_settings,
                             is_vertical=is_vertical
                         )
+                        processed_count += 1
+                        output_paths.append(str(output_path))
+                        
                     except Exception as e:
                         logging.error(f"Lỗi khi xử lý nhóm {name}: {e}")
+                        error_count += 1
                         continue
+
+            # Update task status based on results
+            if error_count == 0:
+                task_history.update_task_status(
+                    task_id,
+                    "completed",
+                    message=f"Đã xử lý thành công {processed_count} video",
+                    data={
+                        "output_paths": [str(Path(p).relative_to(path_manager.base_path)) for p in output_paths],
+                        "base_path": str(path_manager.base_path)
+                    }
+                )
+            else:
+                task_history.update_task_status(
+                    task_id,
+                    "error",
+                    error=f"Có lỗi khi xử lý {error_count}/{processed_count + error_count} video",
+                    data={
+                        "output_paths": [str(Path(p).relative_to(path_manager.base_path)) for p in output_paths],
+                        "base_path": str(path_manager.base_path)
+                    }
+                )
 
         except Exception as e:
             logging.error(f"Lỗi khi xử lý batch video: {e}")
+            task_history.update_task_status(
+                task_id,
+                "error",
+                error=str(e)
+            )
             raise

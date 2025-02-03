@@ -4,11 +4,15 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import os
 import uuid
+import asyncio
+from typing import Optional
 
 class TaskHistoryManager:
     def __init__(self, base_path):
         self.history_file = Path(base_path) / "task_history.json"
         self.max_history_days = 30  # Giữ lịch sử trong 30 ngày
+        self.task_events = {}  # Store events for task completion
+        self.max_wait_time = 30 * 60  # 30 minutes timeout
         
         # Tạo file mới nếu chưa tồn tại hoặc bị lỗi
         self._initialize_history_file()
@@ -20,7 +24,11 @@ class TaskHistoryManager:
                 # Thử đọc file hiện tại
                 try:
                     with open(self.history_file, 'r', encoding='utf-8') as f:
-                        json.load(f)
+                        data = json.load(f)
+                        # Initialize task events for existing tasks
+                        for task_id, task_data in data.items():
+                            if task_data.get('status') == 'processing':
+                                self.task_events[task_id] = asyncio.Event()
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     # Nếu file lỗi, backup và tạo mới
                     backup_path = self.history_file.with_suffix('.json.bak')
@@ -42,7 +50,7 @@ class TaskHistoryManager:
             logging.error(f"Error initializing task history: {e}")
             # Đảm bảo luôn có file history hợp lệ
             self._create_new_history_file()
-    
+
     def _create_new_history_file(self):
         """Tạo file history mới với nội dung rỗng"""
         try:
@@ -53,14 +61,28 @@ class TaskHistoryManager:
             logging.error(f"Error creating new history file: {e}")
             raise
     
+    def create_task(self, task_id: str, initial_status: dict):
+        """Create a new task with initial status"""
+        logging.info(f"Creating new task {task_id} with status {initial_status}")
+        self.task_events[task_id] = asyncio.Event()
+        self.save_task(task_id, initial_status)
+        
     def save_task(self, task_id: str, task_data: dict):
         """Lưu thông tin task vào file history"""
+        logging.info(f"Saving task {task_id} with data {task_data}")
         try:
             # Đọc history hiện tại
             history = self._read_history()
+            logging.debug(f"Current history: {history}")
             
             # Thêm timestamp
-            task_data['saved_at'] = datetime.now().isoformat()
+            task_data['updated_at'] = datetime.now().isoformat()
+            if 'created_at' not in task_data:
+                task_data['created_at'] = task_data['updated_at']
+            
+            # Check if task is complete
+            old_status = history.get(task_id, {}).get('status')
+            new_status = task_data.get('status')
             
             # Lưu task
             history[task_id] = task_data
@@ -70,7 +92,13 @@ class TaskHistoryManager:
             
             # Ghi lại file
             self._write_history(history)
+            logging.info(f"Task {task_id} saved successfully")
             
+            # Set event if task is complete
+            if old_status == 'processing' and new_status in ['completed', 'error']:
+                if task_id in self.task_events:
+                    self.task_events[task_id].set()
+                    
         except Exception as e:
             logging.error(f"Error saving task history: {e}")
             # Nếu có lỗi, thử khởi tạo lại file và lưu
@@ -78,8 +106,42 @@ class TaskHistoryManager:
                 self._initialize_history_file()
                 history = {task_id: task_data}
                 self._write_history(history)
+                logging.info(f"Task {task_id} saved after recovery")
             except Exception as e2:
                 logging.error(f"Failed to recover and save task: {e2}")
+    
+    async def wait_for_task(self, task_id: str, timeout: int = 1800) -> dict:
+        """Đợi cho đến khi task hoàn thành hoặc có lỗi
+        Args:
+            task_id (str): ID của task
+            timeout (int): Thời gian timeout tính bằng giây, mặc định 30 phút
+        Returns:
+            dict: Task data
+        Raises:
+            asyncio.TimeoutError: Nếu quá thời gian timeout
+        """
+        import asyncio
+        import time
+        
+        start_time = time.time()
+        check_interval = 1  # Check mỗi giây
+        
+        while True:
+            # Check if timeout
+            if time.time() - start_time > timeout:
+                raise asyncio.TimeoutError(f"Task {task_id} timeout after {timeout} seconds")
+                
+            # Get current status
+            task = self.get_task(task_id)
+            if task.get('status') == 'not_found':
+                raise ValueError(f"Task {task_id} not found")
+                
+            # Return if task is completed or has error
+            if task.get('status') in ['completed', 'error']:
+                return task
+                
+            # Wait before next check
+            await asyncio.sleep(check_interval)
     
     def get_task(self, task_id: str) -> dict:
         """Lấy thông tin task từ history"""
@@ -110,22 +172,13 @@ class TaskHistoryManager:
     def _write_history(self, history: dict):
         """Ghi file history"""
         try:
-            # Ghi vào file tạm trước
-            temp_file = self.history_file.with_suffix('.json.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            # Ghi trực tiếp vào file history
+            with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, indent=2, ensure_ascii=False)
-            
-            # Rename file tạm thành file chính
-            os.replace(temp_file, self.history_file)
+            logging.info(f"Task history saved to {self.history_file}")
             
         except Exception as e:
             logging.error(f"Error writing history file: {e}")
-            # Xóa file tạm nếu có lỗi
-            if temp_file.exists():
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
             raise
     
     def _cleanup_old_tasks(self, history: dict):
@@ -135,40 +188,44 @@ class TaskHistoryManager:
         
         for task_id, task_data in history_copy.items():
             try:
-                saved_at = datetime.fromisoformat(task_data.get('saved_at', now.isoformat()))
-                if now - saved_at > timedelta(days=self.max_history_days):
+                # Dùng created_at thay vì saved_at
+                created_at = datetime.fromisoformat(task_data.get('created_at', now.isoformat()))
+                if now - created_at > timedelta(days=self.max_history_days):
                     del history[task_id]
             except (ValueError, TypeError) as e:
                 logging.warning(f"Invalid date format for task {task_id}: {e}")
                 # Giữ lại task nếu không parse được ngày
-
-    def create_task(self) -> str:
-        """Create a new task and return its ID"""
-        task_id = str(uuid.uuid4())
-        self.update_task_status(task_id, "created", "Task created")
-        return task_id
-
-    def update_task_status(self, task_id: str, status: str, message: str = None, error: str = None):
-        """Update status of a task"""
-        try:
-            # Load current history
-            with open(self.history_file, 'r', encoding='utf-8') as f:
-                history = json.load(f)
-            
-            # Add or update task
-            task = {
-                "task_id": task_id,
-                "status": status,
-                "message": message,
-                "error": error,
-                "updated_at": datetime.now().isoformat()
-            }
-            history[task_id] = task
-            
-            # Save updated history
-            with open(self.history_file, 'w', encoding='utf-8') as f:
-                json.dump(history, f, indent=2)
                 
+    def update_task_status(self, task_id: str, status: str, message: str = None, error: str = None, data: dict = None):
+        """Update task status
+        Args:
+            task_id (str): ID của task
+            status (str): Status mới (completed, error, processing)
+            message (str, optional): Message mới. Defaults to None.
+            error (str, optional): Error message nếu có lỗi. Defaults to None.
+            data (dict, optional): Additional task data. Defaults to None.
+        """
+        logging.info(f"Updating task {task_id} status to {status}")
+        try:
+            # Get current task
+            task = self.get_task(task_id)
+            if task.get('status') == 'not_found':
+                logging.error(f"Cannot update non-existent task {task_id}")
+                return
+                
+            # Update task data
+            task['status'] = status
+            if message:
+                task['message'] = message
+            if error:
+                task['error'] = error
+            if data:
+                task.update(data)
+                
+            # Save updated task
+            self.save_task(task_id, task)
+            logging.info(f"Task {task_id} status updated successfully")
+            
         except Exception as e:
             logging.error(f"Error updating task status: {e}")
             raise

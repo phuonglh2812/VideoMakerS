@@ -5,6 +5,7 @@ import subprocess
 import random
 from typing import List, Tuple
 from ..file.file_manager import FileManager
+from ..utils.task_history_manager import TaskHistoryManager
 
 class HookBackgroundProcessor:
     def __init__(self, base_path: Path):
@@ -332,3 +333,4 @@ class HookBackgroundProcessor:
         except Exception as e:
             logging.error(f"Error processing background videos: {e}")
             raise
+        

@@ -9,6 +9,8 @@ from typing import Optional, Dict
 import uuid
 import json
 from datetime import datetime
+import logging
+import asyncio
 
 # Add project root to Python path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -27,10 +29,10 @@ path_manager = PathManager()
 
 # Initialize processors and managers
 video_maker = VideoMakerRouter()
+settings_manager = SettingsManager()  # SettingsManager uses path_manager internally
 hook_processor = HookVideoProcessor(path_manager.base_path)
 file_manager = FileManager(path_manager.base_path)
-settings_manager = SettingsManager()  # Không cần truyền base_path nữa
-task_history = TaskHistoryManager(path_manager.base_path)
+task_history = TaskHistoryManager(path_manager.base_path)  # Use base_path from path_manager
 
 # Create FastAPI app
 app = FastAPI(
@@ -51,6 +53,22 @@ app.add_middleware(
 # Add video maker router
 app.include_router(video_maker.router, prefix="/api/v1")
 
+def update_task_status(task_id: str, status: str, message: str = None, error: str = None):
+    """Update task status in history"""
+    task_data = {
+        "task_id": task_id,
+        "status": status,
+        "message": message,
+        "error": error
+    }
+    task_history.save_task(task_id, task_data)
+
+def create_task(initial_status: dict) -> str:
+    """Create a new task with initial status"""
+    task_id = str(uuid.uuid4())
+    task_history.create_task(task_id, initial_status)
+    return task_id
+
 # Hook API endpoints
 @app.post("/api/v1/hook/process")
 async def process_hook_video(
@@ -63,7 +81,7 @@ async def process_hook_video(
     subtitle_settings: Optional[str] = Form(None),
     is_vertical: bool = Form(False)
 ):
-    task_id = str(uuid.uuid4())
+    task_id = create_task({"status": "processing", "message": "Task started successfully"})
     try:
         # Save uploaded files
         hook_path = await file_manager.save_upload(hook_audio, "temp")
@@ -97,6 +115,7 @@ async def process_hook_video(
             "message": "Task started successfully"
         }
     except Exception as e:
+        update_task_status(task_id, "error", error=str(e))
         return {
             "task_id": task_id,
             "status": "error",
@@ -115,19 +134,22 @@ async def process_batch_hooks_16_9(
         input_folder: Thư mục chứa các file đầu vào
         preset_name: Tên preset cài đặt phụ đề
     """
-    task_id = str(uuid.uuid4())
     try:
-        # Kiểm tra thư mục đầu vào
+        # Validate input folder
         input_path = Path(input_folder)
         if not input_path.exists():
             raise HTTPException(status_code=400, detail=f"Thư mục không tồn tại: {input_folder}")
-        if not input_path.is_dir():
-            raise HTTPException(status_code=400, detail=f"Đường dẫn không phải là thư mục: {input_folder}")
 
         # Get subtitle settings from preset
         subtitle_settings = settings_manager.load_preset(preset_name)
         if not subtitle_settings:
             raise HTTPException(status_code=400, detail=f"Không tìm thấy preset: {preset_name}")
+
+        # Create task after validation
+        task_id = create_task({
+            "status": "processing",
+            "message": "Đang xử lý batch video 16:9"
+        })
 
         # Process videos in background
         background_tasks.add_task(
@@ -144,19 +166,10 @@ async def process_batch_hooks_16_9(
             "message": "Đang xử lý batch video 16:9"
         }
     except HTTPException as e:
-        return {
-            "task_id": task_id,
-            "status": "error",
-            "error": str(e.detail)
-        }
+        raise e
     except Exception as e:
-        import logging
         logging.error(f"Lỗi khi xử lý batch video 16:9: {str(e)}")
-        return {
-            "task_id": task_id,
-            "status": "error",
-            "error": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/hook/batch/9_16")
 async def process_batch_hooks_9_16(
@@ -170,19 +183,22 @@ async def process_batch_hooks_9_16(
         input_folder: Thư mục chứa các file đầu vào
         preset_name: Tên preset cài đặt phụ đề
     """
-    task_id = str(uuid.uuid4())
     try:
-        # Kiểm tra thư mục đầu vào
+        # Validate input folder
         input_path = Path(input_folder)
         if not input_path.exists():
             raise HTTPException(status_code=400, detail=f"Thư mục không tồn tại: {input_folder}")
-        if not input_path.is_dir():
-            raise HTTPException(status_code=400, detail=f"Đường dẫn không phải là thư mục: {input_folder}")
 
         # Get subtitle settings from preset
         subtitle_settings = settings_manager.load_preset(preset_name)
         if not subtitle_settings:
             raise HTTPException(status_code=400, detail=f"Không tìm thấy preset: {preset_name}")
+
+        # Create task after validation
+        task_id = create_task({
+            "status": "processing",
+            "message": "Đang xử lý batch video 9:16"
+        })
 
         # Process videos in background
         background_tasks.add_task(
@@ -199,23 +215,47 @@ async def process_batch_hooks_9_16(
             "message": "Đang xử lý batch video 9:16"
         }
     except HTTPException as e:
-        return {
-            "task_id": task_id,
-            "status": "error",
-            "error": str(e.detail)
-        }
+        raise e
     except Exception as e:
-        import logging
         logging.error(f"Lỗi khi xử lý batch video 9:16: {str(e)}")
-        return {
-            "task_id": task_id,
-            "status": "error",
-            "error": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/hook/status/{task_id}")
 async def get_hook_status(task_id: str):
-    return task_history.get_task_status(task_id)
+    """Get status of a hook processing task"""
+    try:
+        # Get current task status
+        status = task_history.get_task(task_id)
+        
+        # If task not found, return 404
+        if status.get('status') == 'not_found':
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Task {task_id} not found"
+            )
+            
+        # If task is completed or has error, return immediately
+        if status.get('status') in ['completed', 'error']:
+            return status
+            
+        # If task is still processing, wait for completion or error
+        try:
+            # Wait for task to complete with 30 minute timeout
+            status = await task_history.wait_for_task(task_id)
+            return status
+            
+        except asyncio.TimeoutError:
+            logging.warning(f"Timeout waiting for task {task_id}")
+            raise HTTPException(
+                status_code=408,  # Request Timeout
+                detail=f"Task {task_id} processing timeout after 30 minutes"
+            )
+            
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Error getting hook status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/hook/presets")
 async def get_presets():
@@ -243,7 +283,6 @@ async def delete_preset(preset_name: str):
 
 if __name__ == "__main__":
     # Setup logging
-    import logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'

@@ -142,11 +142,42 @@ class SubtitleProcessor:
             # Cập nhật style từ config nếu có
             if config:
                 logging.info(f"Applying config: {config}")
-                for key, value in config.items():
+                
+                # Map preset field names to ASS style names
+                field_mapping = {
+                    'font_name': 'fontname',
+                    'font_size': 'fontsize',
+                    'primary_color': 'primarycolor',
+                    'outline_color': 'outlinecolor',
+                    'back_color': 'backcolor',
+                    'outline_width': 'outline',
+                    'shadow_width': 'shadow',
+                    'margin_v': 'marginv',
+                    'margin_h': 'marginl',  # Use marginl for horizontal margin
+                    'alignment': 'alignment'
+                }
+                
+                # Convert config to ASS style format
+                ass_config = {}
+                for preset_field, ass_field in field_mapping.items():
+                    if preset_field in config:
+                        value = config[preset_field]
+                        # Convert numeric fields
+                        if preset_field in ['font_size', 'outline_width', 'shadow_width', 'margin_v', 'margin_h', 'alignment']:
+                            value = int(str(value))
+                        # Convert color fields
+                        elif preset_field in ['primary_color', 'outline_color', 'back_color']:
+                            value = self.color_converter.normalize_color(value)
+                        ass_config[ass_field] = value
+                        # Set right margin equal to left margin
+                        if preset_field == 'margin_h':
+                            ass_config['marginr'] = value
+                
+                logging.info(f"Converted config: {ass_config}")
+                
+                # Apply converted config to style
+                for key, value in ass_config.items():
                     if hasattr(style, key):
-                        # Convert alignment từ string sang int nếu cần
-                        if key == 'alignment' and isinstance(value, str):
-                            value = int(value)
                         old_value = getattr(style, key)
                         setattr(style, key, value)
                         logging.info(f"Updated {key}: {old_value} -> {value}")

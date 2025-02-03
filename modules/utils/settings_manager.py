@@ -53,7 +53,11 @@ class SettingsManager:
             preset_file = self._get_preset_file(name)
             if preset_file.exists():
                 with open(preset_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Handle nested structure with "1" key
+                    if isinstance(data, dict) and "1" in data:
+                        return data["1"]
+                    return data
             return None
         except Exception as e:
             logging.error(f"Lỗi khi load preset {name}: {e}")

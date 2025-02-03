@@ -47,7 +47,7 @@ class PathManager:
         Args:
             base_path: Đường dẫn gốc, mặc định là thư mục hiện tại
         """
-        self.base_path = Path(base_path or os.getenv("BASE_PATH", "D:/SuaCode1"))
+        self.base_path = Path(base_path or os.getenv("BASE_PATH", "D:/AutomateWorkFlow/WorkflowFile/VideoMakerS_Files"))
         self.presets_path = self.base_path / "config/presets"  # Shared presets folder
         self._init_paths()
         
