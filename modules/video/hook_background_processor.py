@@ -119,28 +119,36 @@ class HookBackgroundProcessor:
             logging.error(f"Error concatenating videos: {e}")
             raise
             
-    def process_background_videos(self, hook_duration: float, audio_duration: float, temp_dir: Path, is_vertical: bool = False) -> Tuple[Path, Path]:
-        """Process background videos for hook and main parts
-        
-        Args:
-            hook_duration: Duration of hook audio in seconds
-            audio_duration: Duration of main audio in seconds
-            temp_dir: Directory to store temporary files
-            is_vertical: Whether to use vertical videos from input_9_16 directory
-            
-        Returns:
-            Tuple[Path, Path]: Paths to hook background and main background videos
+    def process_background_videos(
+        self,
+        hook_duration: float,
+        audio_duration: float,
+        temp_dir: Path,
+        is_vertical: bool = False,
+        bg_path: Path = None  # <-- cho phép truyền bg_path
+    ) -> Tuple[Path, Path]:
+        """
+        Process background videos for hook and main parts.
+        Nếu bg_path != None => dùng bg_path
+        Ngược lại => dùng self.input_9_16_dir hoặc self.input_16_9_dir.
         """
         try:
             total_duration = hook_duration + audio_duration
-            
-            # Select input directory based on video orientation
-            input_dir = self.input_9_16_dir if is_vertical else self.input_16_9_dir
-            
-            # Get all mp4 files from input directory
+
+            # Nếu bg_path được truyền thì dùng thư mục này:
+            if bg_path is not None:
+                input_dir = bg_path
+            else:
+                # Mặc định cũ
+                input_dir = self.input_9_16_dir if is_vertical else self.input_16_9_dir
+
+            if not input_dir.exists():
+                raise ValueError(f"No videos found: {input_dir} (Does not exist)")
+
             available_videos = list(input_dir.glob('*.mp4'))
             if not available_videos:
                 raise ValueError(f"No videos found in {input_dir}")
+
             
             # Randomize video list
             random.shuffle(available_videos)

@@ -126,13 +126,15 @@ async def process_hook_video(
 async def process_batch_hooks_16_9(
     background_tasks: BackgroundTasks,
     input_folder: str = Form(...),
-    preset_name: str = Form(...)
+    preset_name: str = Form(...),
+    bg_path: str = Form(None)
 ):
     """
     Xử lý batch video hook với tỉ lệ 16:9
     Args:
         input_folder: Thư mục chứa các file đầu vào
         preset_name: Tên preset cài đặt phụ đề
+        bg_path: Đường dẫn đến file nền (nếu có)
     """
     try:
         # Validate input folder
@@ -151,13 +153,19 @@ async def process_batch_hooks_16_9(
             "message": "Đang xử lý batch video 16:9"
         })
 
+        # Use bg_path if provided, otherwise use the default
+        background_path = bg_path if bg_path else path_manager.default_background_path
+
+        # ---- SỬA Ở ĐÂY: Chuyển background_path sang Path ----
+        background_path = Path(background_path)  # Quan trọng!
+
         # Process videos in background
         background_tasks.add_task(
             hook_processor.process_batch_videos_background,
             task_id,
             input_path,
             subtitle_settings,
-            is_vertical=False  # 16:9 video
+            background_path    # Lúc này background_path đã là Path
         )
 
         return {
@@ -175,24 +183,32 @@ async def process_batch_hooks_16_9(
 async def process_batch_hooks_9_16(
     background_tasks: BackgroundTasks,
     input_folder: str = Form(...),
-    preset_name: str = Form(...)
+    preset_name: str = Form(...),
+    bg_path: str = Form(None)
 ):
     """
     Xử lý batch video hook với tỉ lệ 9:16
     Args:
         input_folder: Thư mục chứa các file đầu vào
         preset_name: Tên preset cài đặt phụ đề
+        bg_path: Đường dẫn đến file nền (nếu có) 
     """
     try:
         # Validate input folder
         input_path = Path(input_folder)
         if not input_path.exists():
-            raise HTTPException(status_code=400, detail=f"Thư mục không tồn tại: {input_folder}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Thư mục không tồn tại: {input_folder}"
+            )
 
         # Get subtitle settings from preset
         subtitle_settings = settings_manager.load_preset(preset_name)
         if not subtitle_settings:
-            raise HTTPException(status_code=400, detail=f"Không tìm thấy preset: {preset_name}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Không tìm thấy preset: {preset_name}"
+            )
 
         # Create task after validation
         task_id = create_task({
@@ -200,13 +216,20 @@ async def process_batch_hooks_9_16(
             "message": "Đang xử lý batch video 9:16"
         })
 
-        # Process videos in background
+        # Use bg_path if provided, otherwise use the default
+        background_path = bg_path if bg_path else path_manager.default_background_path
+
+        # CHUYỂN THÀNH PATH  (bắt buộc để .exists() không lỗi)
+        background_path = Path(background_path)
+
+        # Giả sử bạn muốn đặt is_vertical=True cho video 9:16
         background_tasks.add_task(
             hook_processor.process_batch_videos_background,
             task_id,
             input_path,
             subtitle_settings,
-            is_vertical=True  # 9:16 video
+            background_path,
+            True  # <-- truyền True để báo là 9:16 (nếu hàm bạn sử dụng tham số này)
         )
 
         return {

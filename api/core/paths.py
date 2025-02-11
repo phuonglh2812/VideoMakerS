@@ -41,14 +41,17 @@ class PathManager:
     - output/: Output directory for processed videos
     """
     
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: str = None, bg_path: str = None):
         """
         Initialize path manager
         Args:
             base_path: Đường dẫn gốc, mặc định là thư mục hiện tại
+            bg_path: Đường dẫn đến thư mục nền (nếu có)
         """
         self.base_path = Path(base_path or os.getenv("BASE_PATH", "D:/AutomateWorkFlow/WorkflowFile/VideoMakerS_Files"))
         self.presets_path = self.base_path / "config/presets"  # Shared presets folder
+        self.bg_path = bg_path
+        self.default_background_path = self.base_path / "default_background"  # Define default background path
         self._init_paths()
         
         # Create presets directory if it doesn't exist
@@ -77,8 +80,8 @@ class PathManager:
         
         # Hook maker workflow paths
         self.hook_maker_paths = {
-            "input_16_9": "Input_16_9",  # For 16:9 videos
-            "input_9_16": "input_9_16",  # For 9:16 videos
+            "input_16_9": self.bg_path if self.bg_path else "Input_16_9",  # For 16:9 videos
+            "input_9_16": self.bg_path if self.bg_path else "input_9_16",  # For 9:16 videos
             "cut": "cut",
             "used": "used",
             "temp": "temp",
@@ -102,7 +105,10 @@ class PathManager:
             
         # Create hook maker directories
         for path in self.hook_maker_paths.values():
-            (self.base_path / path).mkdir(parents=True, exist_ok=True)
+            if isinstance(path, str):
+                (self.base_path / path).mkdir(parents=True, exist_ok=True)
+            else:
+                path.mkdir(parents=True, exist_ok=True)
             
     def get_path(self, path_key: str, workflow: str = None) -> Path:
         """
@@ -128,7 +134,10 @@ class PathManager:
                 raise KeyError(f"Invalid common path key: {path_key}")
             relative_path = self.common_paths[path_key]
             
-        return self.base_path / relative_path
+        if isinstance(relative_path, str):
+            return self.base_path / relative_path
+        else:
+            return relative_path
         
     def get_workflow_paths(self, workflow: str) -> dict:
         """
@@ -147,7 +156,7 @@ class PathManager:
             
         # Convert paths to absolute paths
         return {
-            key: self.base_path / path
+            key: self.base_path / path if isinstance(path, str) else path
             for key, path in paths.items()
         }
     

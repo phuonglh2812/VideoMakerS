@@ -11,6 +11,7 @@ from .subtitle_processor import SubtitleProcessor
 from .hook_background_processor import HookBackgroundProcessor
 import ffmpeg
 from api.core.paths import path_manager
+from fastapi import HTTPException
 
 class HookVideoProcessor:
     """Class xử lý video hook"""
@@ -513,10 +514,12 @@ class HookVideoProcessor:
         subtitle_path: Path,
         output_path: Path,
         subtitle_settings: Dict,
-        is_vertical: bool = False
+        is_vertical: bool = False,
+        bg_path: Path = None  # <-- Thêm tham số này
     ) -> bool:
-        """Process video with hook audio and background videos
-        
+        """
+        Process video with hook audio and background videos.
+
         Args:
             hook_audio: Path to hook audio file (.mp3/.wav)
             audio_path: Path to main audio file (.mp3/.wav)
@@ -525,6 +528,7 @@ class HookVideoProcessor:
             output_path: Path to output video
             subtitle_settings: Subtitle settings dict
             is_vertical: Whether the video is vertical
+            bg_path: Thư mục chứa các video nền (nếu có)
         """
         try:
             retry_count = 1
@@ -536,14 +540,13 @@ class HookVideoProcessor:
                 try:
                     temp_dir = self.temp_dir
                     
-                    # Step 1: Normalize audio files
+                    # Step 1: Normalize audio
                     hook_norm_wav = Path(temp_dir) / self.get_temp_filename("normalized_hook", "wav")
                     main_norm_wav = Path(temp_dir) / self.get_temp_filename("normalized_main", "wav")
                     
                     self.normalize_audio(hook_audio, hook_norm_wav)
                     self.normalize_audio(audio_path, main_norm_wav)
                     
-                    # Add to temp_files only if they exist
                     if hook_norm_wav.exists():
                         temp_files.append(hook_norm_wav)
                     if main_norm_wav.exists():
@@ -553,12 +556,15 @@ class HookVideoProcessor:
                     hook_duration = self.get_audio_duration(hook_norm_wav)
                     audio_duration = self.get_audio_duration(main_norm_wav)
                     
-                    # Step 3: Process background videos
+                    # Step 3: Process background videos - truyền bg_path nếu có
                     hook_bg, main_bg = self.background_processor.process_background_videos(
-                        hook_duration, audio_duration, temp_dir, is_vertical
+                        hook_duration=hook_duration,
+                        audio_duration=audio_duration,
+                        temp_dir=temp_dir,
+                        is_vertical=is_vertical,
+                        bg_path=bg_path  # <--- QUAN TRỌNG
                     )
                     
-                    # Add to temp_files only if they exist
                     hook_bg_path = Path(hook_bg)
                     main_bg_path = Path(main_bg)
                     if hook_bg_path.exists():
@@ -566,16 +572,27 @@ class HookVideoProcessor:
                     if main_bg_path.exists():
                         temp_files.append(main_bg_path)
                     
-                    # Step 4: Add thumbnail with fade to hook background
+                    # Step 4: Add thumbnail with fade
                     hook_with_thumb = Path(temp_dir) / self.get_temp_filename("hook_with_thumbnail", "mp4")
-                    self._add_thumbnail_with_fade(hook_bg, thumbnail_path, hook_norm_wav, hook_with_thumb, is_vertical)
+                    self._add_thumbnail_with_fade(
+                        video_path=hook_bg, 
+                        thumbnail_path=thumbnail_path, 
+                        audio_path=hook_norm_wav, 
+                        output_path=hook_with_thumb, 
+                        is_vertical=is_vertical
+                    )
                     if hook_with_thumb.exists():
                         temp_files.append(hook_with_thumb)
                     
                     # Step 5: Process main part with subtitle
                     main_with_sub = Path(temp_dir) / self.get_temp_filename("main_with_subtitle", "mp4")
                     self._process_video_with_subtitle(
-                        main_bg, main_norm_wav, subtitle_path, main_with_sub, subtitle_settings, is_vertical
+                        video_path=str(main_bg), 
+                        audio_path=str(main_norm_wav), 
+                        subtitle_path=str(subtitle_path), 
+                        output_path=str(main_with_sub), 
+                        subtitle_settings=subtitle_settings, 
+                        is_vertical=is_vertical
                     )
                     if main_with_sub.exists():
                         temp_files.append(main_with_sub)
@@ -597,10 +614,10 @@ class HookVideoProcessor:
             logging.error(f"Error in video processing: {e}")
             raise
         finally:
-            # Log temp files before cleanup
-            logging.info(f"Cleaning up {len(temp_files)} temp files: {[str(f) for f in temp_files]}")
             # Cleanup temp files
+            logging.info(f"Cleaning up {len(temp_files)} temp files: {[str(f) for f in temp_files]}")
             self._cleanup_temp_files(temp_files)
+
 
     def _concatenate_videos(self, video_paths: List[Path], output_path: Path, is_vertical: bool = False):
         """Concatenate multiple videos into one with re-encoding for smooth transitions"""
@@ -671,8 +688,9 @@ class HookVideoProcessor:
     def process_batch_videos_background(
         self,
         task_id: str,
-        input_folder: Path,
+        input_folder: Path,  # Thư mục chứa các file audio, subtitle, v.v.
         subtitle_settings: Dict,
+        bg_path: Path,       # Thư mục chứa các video nền
         is_vertical: bool = False
     ):
         """
@@ -680,6 +698,7 @@ class HookVideoProcessor:
         Args:
             task_id (str): ID của task
             input_folder (Path): Thư mục chứa các file đầu vào
+            bg_path (Path): Thư mục chứa các video nền
             subtitle_settings (Dict): Cài đặt phụ đề
             is_vertical (bool): True nếu là video dọc (9:16)
         """
@@ -696,7 +715,13 @@ class HookVideoProcessor:
             if not input_folder.is_dir():
                 raise ValueError(f"Đường dẫn không phải là thư mục: {input_folder}")
 
-            # Tìm các file theo pattern
+            # Kiểm tra thư mục bg
+            if not bg_path.exists():
+                raise ValueError(f"Thư mục video nền không tồn tại: {bg_path}")
+            if not bg_path.is_dir():
+                raise ValueError(f"Đường dẫn video nền không phải là thư mục: {bg_path}")
+
+            # Tìm các file theo pattern trong input_folder
             file_groups = {}
             for file in input_folder.glob("*"):
                 stem = file.stem.lower()
@@ -752,7 +777,8 @@ class HookVideoProcessor:
                             subtitle_path=group['subtitle'],
                             output_path=output_path,
                             subtitle_settings=subtitle_settings,
-                            is_vertical=is_vertical
+                            is_vertical=is_vertical,
+                            bg_path=bg_path  # <--- thêm
                         )
                         processed_count += 1
                         output_paths.append(str(output_path))
@@ -769,7 +795,10 @@ class HookVideoProcessor:
                     "completed",
                     message=f"Đã xử lý thành công {processed_count} video",
                     data={
-                        "output_paths": [str(Path(p).relative_to(path_manager.base_path)) for p in output_paths],
+                        "output_paths": [
+                            str(Path(p).relative_to(path_manager.base_path)) 
+                            for p in output_paths
+                        ],
                         "base_path": str(path_manager.base_path)
                     }
                 )
@@ -777,9 +806,13 @@ class HookVideoProcessor:
                 task_history.update_task_status(
                     task_id,
                     "error",
-                    error=f"Có lỗi khi xử lý {error_count}/{processed_count + error_count} video",
+                    error=f"Có lỗi khi xử lý {error_count}/"
+                          f"{processed_count + error_count} video",
                     data={
-                        "output_paths": [str(Path(p).relative_to(path_manager.base_path)) for p in output_paths],
+                        "output_paths": [
+                            str(Path(p).relative_to(path_manager.base_path)) 
+                            for p in output_paths
+                        ],
                         "base_path": str(path_manager.base_path)
                     }
                 )
@@ -791,4 +824,4 @@ class HookVideoProcessor:
                 "error",
                 error=str(e)
             )
-            raise
+            raise HTTPException(status_code=500, detail=str(e))
